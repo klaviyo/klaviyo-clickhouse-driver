@@ -1,58 +1,87 @@
+# CI for the Klaviyo fork of clickhouse-driver. See KLAVIYO.md.
+# Every build runs the tests and builds the artifacts. Builds of klaviyo/0.2.9
+# also publish them to Artifactory when LOCAL_VERSION changed.
 env:
   ENG_ECR_REGISTRY: 340433579684.dkr.ecr.us-east-1.amazonaws.com
 
   # login for dev, eng, prod
   AWS_ECR_LOGIN_REGISTRY_IDS: "439508887365,340433579684,368154587575"
 
-  # Set shared repository for unit test images
-  CI_ECR_REPOSITORY: ci-shared
-
-  # Set CI image name
-  CI_IMAGE: "${ENG_ECR_REGISTRY}/${CI_ECR_REPOSITORY}:${BUILDKITE_PIPELINE_SLUG}_${BUILDKITE_COMMIT}"
+  # Same image sources as segmentation-service's CI.
+  ECR_DOCKER_HUB: "${ENG_ECR_REGISTRY}/docker-hub"
+  PUBLIC_DOCKER_REGISTRY: "public.ecr.aws/docker"
+  PYTHON_IMAGE: "public.ecr.aws/docker/library/python:3.10-bookworm"
 
 steps:
-# Run pre-commit
-- label: ":pre-commit: Run Pre-commit"
-  key: pre-commit
-  command: "kbc lint pre-commit -v --buildkite-annotate pre-commit-annotation"
-  secrets:
-    - buildkite-github-app-pem
-    - buildkite-api-token
-  docker:
-    image: "${ENG_ECR_REGISTRY}/klaviyo-pre-commit-python3-10-12:3.10.12"
-    mount-ssh-agent: true
-    volumes:
-      - /var/lib/buildkite-agent/.config/pip/pip.conf:/etc/pip.conf
+  # Upstream's suite, the fork's tests and flake8, against ClickHouse.
+  - label: ":pytest: Tests"
+    key: tests
+    notify:
+      - github_check
+    agents:
+      queue: default-small-arm
+    docker-compose:
+      config: ci/docker-compose.yml
+      run: tests
 
-- label: ":building_construction: Build CI image"
-  key: build-ci-image
-  command: >
-    kbc docker-utils build-and-publish -f Dockerfile -i ${CI_ECR_REPOSITORY} -t ${BUILDKITE_PIPELINE_SLUG}_${BUILDKITE_COMMIT} --pass-pip-creds -a eng
+  # The package has C extensions, so each architecture needs its own
+  # manylinux wheel. Each builds on its native queue, so neither runs under
+  # emulation.
+  - &wheel
+    label: ":python: Wheel (linux aarch64)"
+    key: wheel-aarch64
+    notify:
+      - github_check
+    agents:
+      queue: default-small-arm
+    command: "ci/build_wheels.sh linux aarch64"
+    artifact_paths:
+      - "wheelhouse/*.whl"
+    docker:
+      image: "${PYTHON_IMAGE}"
+      mount-checkout: true
+      # cibuildwheel runs each build in a manylinux container.
+      mount_docker_socket: true
 
-- group: "Tests"
-  key: "tests"
-  steps:
-    - label: "Unit Tests"
-      key: "unit"
-      depends_on:
-        - build-ci-image
-      command: >
-        pytest
-      docker:
-        image: "$CI_IMAGE"
+  - <<: *wheel
+    label: ":python: Wheel (linux x86_64)"
+    key: wheel-x86_64
+    agents:
+      queue: default-small-amd
+    command: "ci/build_wheels.sh linux x86_64"
 
-- label: "Setup.py is Changed"
-  key: setup-py-changed
-  command: "(kbc github get-changed-files | grep setup.py) || (echo 'Please manually bump the version in setup.py' && exit 1)"
+  # macOS installs build from the sdist.
+  - label: ":package: sdist"
+    key: sdist
+    notify:
+      - github_check
+    agents:
+      queue: default-small-arm
+    command: "ci/build_wheels.sh sdist"
+    artifact_paths:
+      - "wheelhouse/*.tar.gz"
+    docker:
+      image: "${PYTHON_IMAGE}"
+      mount-checkout: true
 
-- label: ":jfrog: Publish to Artifactory"
-  command: "kbc python-utils publish-distribution-bdist"
-  if: build.branch == 'master'
-  depends_on:
-    - tests
-    - setup-py-changed
-    - build-ci-image
-  secrets:
-    - "jfrog-artifactory-jenkins-pypirc-file"
-  docker:
-    image: "$CI_IMAGE"
+  - label: ":jfrog: Publish to Artifactory"
+    key: publish
+    depends_on:
+      - tests
+      - wheel-aarch64
+      - wheel-x86_64
+      - sdist
+    branches: "klaviyo/0.2.9"
+    concurrency: 1
+    concurrency_group: "klaviyo-clickhouse-driver/publish"
+    agents:
+      queue: default-small-arm
+    secrets:
+      - "jfrog-artifactory-jenkins-pypirc-file"
+    command: |
+      buildkite-agent artifact download "wheelhouse/*" .
+      ci/publish.sh
+    docker:
+      image: "${PYTHON_IMAGE}"
+      mount-checkout: true
+      mount-buildkite-agent: true
