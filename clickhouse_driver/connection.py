@@ -26,6 +26,7 @@ from .settings.writer import write_settings, SettingsFlags
 from .streams.native import BlockInputStream, BlockOutputStream
 from .util.compat import threading
 from .util.escape import escape_params
+from .util.tls import match_hostname
 from .varint import write_varint, read_varint
 from .writer import write_binary_str
 
@@ -126,6 +127,12 @@ class Connection(object):
                             host param during SSL initialization. This param
                             may be used when connecting over an SSH tunnel
                             to correctly identify the desired server via SNI.
+    :param tls_sni_override: server name to send via SNI instead of
+                             ``server_hostname`` or host. The certificate is
+                             still verified against ``server_hostname`` or
+                             host, before any query data is sent. Like
+                             clickhouse-client's ``--tls-sni-override``.
+                             Defaults to ``None``.
     :param alt_hosts: list of alternative hosts for connection.
                       Example: alt_hosts=host1:port1,host2:port2.
     :param settings_is_important: ``False`` means unknown settings will be
@@ -158,6 +165,7 @@ class Connection(object):
             verify=True, ssl_version=None, ca_certs=None, ciphers=None,
             keyfile=None, certfile=None,
             server_hostname=None,
+            tls_sni_override=None,
             alt_hosts=None,
             settings_is_important=False,
             tcp_keepalive=False,
@@ -206,6 +214,7 @@ class Connection(object):
         self.ssl_options = ssl_options
 
         self.server_hostname = server_hostname
+        self.tls_sni_override = tls_sni_override
 
         # Use LZ4 compression by default.
         if compression is True:
@@ -284,12 +293,24 @@ class Connection(object):
                 sock = socket.socket(af, socktype, proto)
                 sock.settimeout(self.connect_timeout)
 
+                expected_hostname = self.server_hostname or host
                 if self.secure_socket:
                     ssl_context = self._create_ssl_context(ssl_options)
+                    if self.tls_sni_override:
+                        # OpenSSL would check the certificate against the
+                        # SNI, so the check happens after the handshake.
+                        # The chain is still verified during it.
+                        ssl_context.check_hostname = False
                     sock = ssl_context.wrap_socket(
-                        sock, server_hostname=self.server_hostname or host)
+                        sock,
+                        server_hostname=(
+                            self.tls_sni_override or expected_hostname
+                        ))
 
                 sock.connect(sa)
+                if (self.secure_socket and self.tls_sni_override
+                        and self.verify_cert):
+                    match_hostname(sock.getpeercert(), expected_hostname)
                 return sock
 
             except socket.error as _:

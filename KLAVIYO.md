@@ -18,6 +18,10 @@ isn't passed, behavior is the same as upstream. See GPLAT-1727 for the backgroun
 ## How it differs from upstream
 
 - The version is `0.2.9+klaviyo.N` (`LOCAL_VERSION` in `clickhouse_driver/__init__.py`, which `setup.py` reads).
+- `tls_sni_override` is added to `Connection` in `clickhouse_driver/connection.py`. The certificate name check it
+  needs lives in `clickhouse_driver/util/tls.py`, copied from CPython 3.10's `ssl.match_hostname` (which 3.12
+  removes), without the commonName fallback. The tests are in `tests/test_tls_sni_override.py` and use a local TLS
+  server, so they don't need ClickHouse.
 - `ci/build_wheels.sh` builds the published artifacts: cp310 manylinux wheels for x86_64 and aarch64, plus an sdist.
   There is no macOS wheel. macOS installs build from the sdist, which ships the generated `.c` files.
 
