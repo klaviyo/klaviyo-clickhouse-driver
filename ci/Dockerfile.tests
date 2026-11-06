@@ -3,7 +3,7 @@
 # Registry args default to public registries so this also builds locally.
 ARG DOCKER_HUB=docker.io
 ARG PUBLIC_DOCKER_REGISTRY=docker.io
-ARG CLICKHOUSE_VERSION=24.4.1
+ARG CLICKHOUSE_VERSION=26.6.1.1193
 
 FROM ${DOCKER_HUB}/clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} AS clickhouse
 

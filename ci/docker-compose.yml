@@ -2,7 +2,7 @@
 #   docker compose -f ci/docker-compose.yml run --rm tests
 services:
   clickhouse-server:
-    image: "${ECR_DOCKER_HUB:-docker.io}/clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-24.4.1}"
+    image: "${ECR_DOCKER_HUB:-docker.io}/clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-26.6.1.1193}"
     environment:
       - TZ=Europe/Moscow
       # Newer images restrict the passwordless default user to localhost.
@@ -23,7 +23,7 @@ services:
       args:
         DOCKER_HUB: "${ECR_DOCKER_HUB:-docker.io}"
         PUBLIC_DOCKER_REGISTRY: "${PUBLIC_DOCKER_REGISTRY:-docker.io}"
-        CLICKHOUSE_VERSION: "${CLICKHOUSE_VERSION:-24.4.1}"
+        CLICKHOUSE_VERSION: "${CLICKHOUSE_VERSION:-26.6.1.1193}"
     environment:
       - TZ=UTC
     depends_on:
