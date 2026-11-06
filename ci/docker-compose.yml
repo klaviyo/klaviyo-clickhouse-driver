@@ -1,0 +1,32 @@
+# Used by the "Tests" step in kcd.yaml, and locally with:
+#   docker compose -f ci/docker-compose.yml run --rm tests
+services:
+  clickhouse-server:
+    image: "${ECR_DOCKER_HUB:-docker.io}/clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-24.4.1}"
+    environment:
+      - TZ=Europe/Moscow
+      # Newer images restrict the passwordless default user to localhost.
+      - CLICKHOUSE_SKIP_USER_SETUP=1
+    volumes:
+      - "../tests/clickhouse_server_config/clickhouse.xml:/etc/clickhouse-server/config.d/test_config.xml:ro"
+      - "../tests/clickhouse_server_config/certs:/etc/clickhouse-server/certs:ro"
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "-q", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  tests:
+    build:
+      context: ..
+      dockerfile: ci/Dockerfile.tests
+      args:
+        DOCKER_HUB: "${ECR_DOCKER_HUB:-docker.io}"
+        PUBLIC_DOCKER_REGISTRY: "${PUBLIC_DOCKER_REGISTRY:-docker.io}"
+        CLICKHOUSE_VERSION: "${CLICKHOUSE_VERSION:-24.4.1}"
+    environment:
+      - TZ=UTC
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
+    command: ["sh", "-c", "flake8 && python -m pytest --timeout=10 -v -p no:cacheprovider"]

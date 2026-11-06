@@ -1,0 +1,19 @@
+# Test runner for the upstream suite plus the fork's tests. The suite shells
+# out to clickhouse-client, so the binary is copied from the server image.
+# Registry args default to public registries so this also builds locally.
+ARG DOCKER_HUB=docker.io
+ARG PUBLIC_DOCKER_REGISTRY=docker.io
+ARG CLICKHOUSE_VERSION=24.4.1
+
+FROM ${DOCKER_HUB}/clickhouse/clickhouse-server:${CLICKHOUSE_VERSION} AS clickhouse
+
+FROM ${PUBLIC_DOCKER_REGISTRY}/library/python:3.10-bookworm
+COPY --from=clickhouse /usr/bin/clickhouse /usr/bin/clickhouse
+RUN ln -s /usr/bin/clickhouse /usr/bin/clickhouse-client
+WORKDIR /src
+COPY . /src
+# Same override upstream CI makes: reach the server container by name.
+RUN sed -i 's/^host=localhost$/host=clickhouse-server/' setup.cfg
+RUN pip install --quiet cython 'setuptools<72.2' pytest-timeout flake8 \
+    && python testsrequire.py \
+    && python setup.py develop

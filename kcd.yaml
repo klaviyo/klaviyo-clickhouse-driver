@@ -1,0 +1,80 @@
+# CI for the Klaviyo fork of clickhouse-driver. See KLAVIYO.md.
+# Every build runs the tests and builds the artifacts. Builds of klaviyo/0.2.9
+# also publish them to Artifactory when LOCAL_VERSION changed.
+env:
+  ENG_ECR_REGISTRY: 340433579684.dkr.ecr.us-east-1.amazonaws.com
+  AWS_ECR_LOGIN_REGISTRY_IDS: "340433579684"
+  ECR_DOCKER_HUB: "${ENG_ECR_REGISTRY}/docker-hub"
+  PUBLIC_DOCKER_REGISTRY: "public.ecr.aws/docker"
+  PYTHON_IMAGE: "public.ecr.aws/docker/library/python:3.10-bookworm"
+
+steps:
+  - label: ":pytest: Tests"
+    key: tests
+    notify:
+      - github_check
+    agents:
+      queue: default-small-arm
+    docker-compose:
+      config: ci/docker-compose.yml
+      run: tests
+
+  # One wheel step per architecture, each on its native queue, so neither
+  # build runs under emulation.
+  - &wheel
+    label: ":python: Wheel (linux aarch64)"
+    key: wheel-aarch64
+    notify:
+      - github_check
+    agents:
+      queue: default-small-arm
+    command: "ci/build_wheels.sh linux aarch64"
+    artifact_paths:
+      - "wheelhouse/*.whl"
+    docker:
+      image: "${PYTHON_IMAGE}"
+      mount-checkout: true
+      # cibuildwheel runs each build in a manylinux container.
+      mount_docker_socket: true
+
+  - <<: *wheel
+    label: ":python: Wheel (linux x86_64)"
+    key: wheel-x86_64
+    agents:
+      queue: default-small-amd
+    command: "ci/build_wheels.sh linux x86_64"
+
+  - label: ":package: sdist"
+    key: sdist
+    notify:
+      - github_check
+    agents:
+      queue: default-small-arm
+    command: "ci/build_wheels.sh sdist"
+    artifact_paths:
+      - "wheelhouse/*.tar.gz"
+    docker:
+      image: "${PYTHON_IMAGE}"
+      mount-checkout: true
+
+  - label: ":jfrog: Publish to Artifactory"
+    key: publish
+    depends_on:
+      - tests
+      - wheel-aarch64
+      - wheel-x86_64
+      - sdist
+    branches: "klaviyo/0.2.9"
+    concurrency: 1
+    concurrency_group: "klaviyo-clickhouse-driver/publish"
+    agents:
+      queue: default-small-arm
+    secrets:
+      - "jfrog-artifactory-jenkins-pypirc-file"
+    command: |
+      buildkite-agent artifact download "wheelhouse/*" .
+      ci/publish.sh
+    docker:
+      image: "${PYTHON_IMAGE}"
+      mount-checkout: true
+      mount-buildkite-agent: true
