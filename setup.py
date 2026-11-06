@@ -19,16 +19,22 @@ here = os.path.abspath(os.path.dirname(__file__))
 
 def read_version():
     regexp = re.compile(r'^VERSION\W*=\W*\(([^\(\)]*)\)')
+    local_regexp = re.compile(r"^LOCAL_VERSION\s*=\s*'([^']+)'")
     init_py = os.path.join(here, 'clickhouse_driver', '__init__.py')
+    version = local_version = None
     with open(init_py, encoding='utf-8') as f:
         for line in f:
             match = regexp.match(line)
             if match is not None:
-                return match.group(1).replace(', ', '.')
-        else:
-            raise RuntimeError(
-                'Cannot find version in clickhouse_driver/__init__.py'
-            )
+                version = match.group(1).replace(', ', '.')
+            local_match = local_regexp.match(line)
+            if local_match is not None:
+                local_version = local_match.group(1)
+    if version is None or local_version is None:
+        raise RuntimeError(
+            'Cannot find version in clickhouse_driver/__init__.py'
+        )
+    return version + '+' + local_version
 
 
 with open(os.path.join(here, 'README.rst'), encoding='utf-8') as f:

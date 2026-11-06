@@ -90,3 +90,6 @@ ENV/
 
 # PyCharm project settings
 .idea/
+
+# Klaviyo fork: ci/build_wheels.sh output
+wheelhouse/
