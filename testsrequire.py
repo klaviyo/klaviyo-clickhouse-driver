@@ -7,6 +7,8 @@ tests_require = [
     'pytest',
     'parameterized',
     'freezegun',
+    # Klaviyo fork: test CA for tests/test_tls_sni_override.py.
+    'trustme',
     'zstd',
     'clickhouse-cityhash>=1.0.2.1'
 ]
